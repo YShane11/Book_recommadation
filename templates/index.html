@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>看得見-圖書推薦系統</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        video, canvas, img {
+            margin: 10px auto;
+            border: 2px solid #ccc;
+            border-radius: 10px;
+            display: none;
+            width: 50%;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #captured-container {
+            margin-top: 20px;
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+        }
+        #captured-image {
+            max-width: 50%;
+            max-height: 100%;
+            display: none;
+        }
+        #response-box {
+            margin-top: 10px;
+            margin-left: 20px;
+            padding: 10px;
+            border: 2px solid #4caf50;
+            border-radius: 10px;
+            width: 50%;
+            text-align: left;
+            height: 550px;
+            max-height: 100%;
+            display: none;
+            background-color: #e8f5e9;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>看得見-圖書推薦系統</h1>
+    <video id="video" autoplay></video>
+    <input type="file" id="upload-image" accept="image/*" style="display:none;">
+    <textarea id="text-input" placeholder="輸入文字..." style="display:none; width:50%; height:100px; margin: 10px auto;"></textarea>
+
+    <button id="upload-btn">上傳圖片</button>
+    <button id="text-btn">文字輸入</button>
+    <button id="close-text-btn" style="display:none;">關閉文字輸入</button>
+    <button id="toggle-btn">開啟攝像頭</button>
+    <button id="capture-btn">掃描</button>
+
+    <div id="captured-container">
+        <img id="captured-image" alt="擷取畫面">
+        <div id="response-box"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const toggleBtn = document.getElementById('toggle-btn');
+        const captureBtn = document.getElementById('capture-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const textBtn = document.getElementById('text-btn');
+        const closeTextBtn = document.getElementById('close-text-btn');
+        const uploadImage = document.getElementById('upload-image');
+        const textInput = document.getElementById('text-input');
+        const capturedImage = document.getElementById('captured-image');
+        const responseBox = document.getElementById('response-box');
+
+        let stream = null;
+
+        const resetUI = () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            video.style.display = 'none';
+            uploadImage.style.display = 'none';
+            textInput.style.display = 'none';
+            capturedImage.style.display = 'none';
+            responseBox.style.display = 'none';
+            textBtn.style.display = 'inline-block';
+            closeTextBtn.style.display = 'none';
+            toggleBtn.textContent = '開啟攝像頭';
+        };
+
+        toggleBtn.addEventListener('click', async () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                video.style.display = 'none';
+                toggleBtn.textContent = '開啟攝像頭';
+            } else {
+                resetUI();
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    video.style.display = 'block';
+                    toggleBtn.textContent = '關閉攝像頭';
+                } catch (error) {
+                    console.error('無法開啟攝像頭:', error);
+                }
+            }
+        });
+
+        captureBtn.addEventListener('click', () => {
+            if (textInput.style.display === 'block') {
+                const text = textInput.value;
+                if (!text.trim()) {
+                    alert('請輸入文字內容');
+                    return;
+                }
+                sendToBackend(text, "text");
+            } else if (stream) {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const dataURL = canvas.toDataURL('image/png');
+                capturedImage.src = dataURL;
+                capturedImage.style.display = 'block';
+
+                sendToBackend(dataURL, "camera");
+            } else {
+                alert('未偵測到掃描內容');
+            }
+        });
+
+        uploadBtn.addEventListener('click', () => {
+            resetUI();
+            uploadImage.click();
+        });
+
+        uploadImage.addEventListener('change', () => {
+            resetUI();
+            const file = uploadImage.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const dataURL = e.target.result;
+                    capturedImage.src = dataURL;
+                    capturedImage.style.display = 'block';
+                    sendToBackend(dataURL, "upload");
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        textBtn.addEventListener('click', () => {
+            resetUI();
+            textInput.style.display = 'block';
+            textBtn.style.display = 'none';
+            closeTextBtn.style.display = 'inline-block';
+        });
+
+        closeTextBtn.addEventListener('click', () => {
+            textInput.style.display = 'none';
+            closeTextBtn.style.display = 'none';
+            textBtn.style.display = 'inline-block';
+        });
+
+        function sendToBackend(data, type) {
+            fetch('/capture', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ image: data, type: type })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.message || '未知的錯誤發生');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('後端回應:', data);
+                responseBox.style.display = 'block';
+                responseBox.innerHTML = `<strong style="font-size: 22px;">後端回應:</strong><br>${data.message}`;
+            })
+            .catch(error => {
+                console.error('傳送失敗:', error);
+                alert(error.message); // 顯示錯誤訊息給使用者
+
+                capturedImage.style.display = 'none';
+                responseBox.style.display = 'none';
+
+                return;
+            });
+        }
+    </script>
+</body>
+</html>
